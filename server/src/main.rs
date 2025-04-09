@@ -16,19 +16,34 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync + 'static>> {
 
     let cert_path = Path::new("examples/server_cert.pem");
     let mut file = File::create(&cert_path)?;
-    file.write(pem::encode(&pem).as_bytes())?;
+    file.write_all(pem::encode(&pem).as_bytes())
+        .unwrap_or_else(|e| panic!("Error while writing pem file {e:?}"));
 
-    println!("Saved server_cert to {}", cert_path.display());
+    info!("Saved server_cert to {}", cert_path.display());
 
     info!("Address: {:?}", config.host);
     loop {
         let connection = endpoint.accept().await.unwrap().await.unwrap();
 
         tokio::spawn(async move {
-            println!(
+            info!(
                 "[server] incoming connection: addr={}",
                 connection.remote_address()
             );
+
+            while let Ok((mut send, mut recv)) = connection.accept_bi().await {
+                // Because it is a bidirectional stream, we can both send and receive.
+                let received = recv
+                    .read_to_end(50)
+                    .await
+                    .unwrap_or_else(|e| panic!("Err: {e:?}"));
+
+                info!("request: {:?}", String::from_utf8(received));
+                send.write_all(b"response")
+                    .await
+                    .unwrap_or_else(|e| panic!("Err: {e:?}"));
+                send.finish().unwrap_or_else(|e| panic!("Err: {e:?}"))
+            }
         });
     }
 }

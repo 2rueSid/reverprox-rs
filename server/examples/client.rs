@@ -1,3 +1,4 @@
+use spdlog::info;
 use std::{
     error::Error,
     fs,
@@ -59,5 +60,19 @@ fn configure_client(
 async fn run_client(endpoint: &Endpoint, server_addr: SocketAddr) {
     let connect = endpoint.connect(server_addr, "localhost").unwrap();
     let connection = connect.await.unwrap();
+    let (mut send, mut recv) = connection
+        .open_bi()
+        .await
+        .unwrap_or_else(|e| panic!("{e:?}"));
     println!("[client] connected: addr={}", connection.remote_address());
+    send.write_all(b"test")
+        .await
+        .unwrap_or_else(|e| panic!("{e:?}"));
+    send.finish().unwrap_or_else(|e| panic!("{e:?}"));
+    let received = recv
+        .read_to_end(10)
+        .await
+        .unwrap_or_else(|e| panic!("{e:?}"));
+
+    info!("Received: {:?}", String::from_utf8(received));
 }
