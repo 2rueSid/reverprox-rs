@@ -25,7 +25,7 @@ reverprox 3000 api
 
 ## MVP
 
-- Ability for client to start a connection to the QUIC server
+- Ability for client to start a Bidirectional connection to the QUIC server
 - Accept HTTP requests from the server
 - Forward reqeusts to the local server `localhost:3000`
 - Wait for the response from the local server

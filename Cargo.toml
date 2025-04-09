@@ -1,8 +1,6 @@
 [workspace]
 resolver = "2"
-members = [ "server"]
+members = [ "message", "server"]
 
 [workspace.package]
 rust-version = "1.85.1"
-
-[workspace.dependencies]

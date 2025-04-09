@@ -1,3 +1,5 @@
+use bytes::Bytes;
+use message::{Message, msg_utils};
 use spdlog::info;
 use std::{
     error::Error,
@@ -22,7 +24,7 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync + 'static>> {
 
     let server_cert = CertificateDer::from(pem_file.contents());
 
-    println!(
+    info!(
         "Loaded server certificate with {} bytes",
         server_cert.as_ref().len()
     );
@@ -34,6 +36,35 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync + 'static>> {
     client.wait_idle().await;
 
     Ok(())
+}
+
+async fn run_client(endpoint: &Endpoint, server_addr: SocketAddr) {
+    let connect = endpoint.connect(server_addr, "localhost").unwrap();
+    let connection = connect.await.unwrap();
+    let msg = Message::new(
+        message::MessageType::Initial,
+        msg_utils::generate_uuid(),
+        Bytes::from_static(b"Hello world!!"),
+    );
+
+    let (mut send, mut recv) = connection
+        .open_bi()
+        .await
+        .unwrap_or_else(|e| panic!("{e:?}"));
+
+    info!("[client] connected: addr={}", connection.remote_address());
+
+    send.write_chunk(msg.encode())
+        .await
+        .unwrap_or_else(|e| panic!("{e:?}"));
+
+    send.finish().unwrap_or_else(|e| panic!("{e:?}"));
+    let received = recv
+        .read_to_end(10)
+        .await
+        .unwrap_or_else(|e| panic!("{e:?}"));
+
+    info!("Received: {:?}", String::from_utf8(received));
 }
 
 fn make_client_endpoint(
@@ -55,24 +86,4 @@ fn configure_client(
     }
 
     Ok(ClientConfig::with_root_certificates(Arc::new(certs))?)
-}
-
-async fn run_client(endpoint: &Endpoint, server_addr: SocketAddr) {
-    let connect = endpoint.connect(server_addr, "localhost").unwrap();
-    let connection = connect.await.unwrap();
-    let (mut send, mut recv) = connection
-        .open_bi()
-        .await
-        .unwrap_or_else(|e| panic!("{e:?}"));
-    println!("[client] connected: addr={}", connection.remote_address());
-    send.write_all(b"test")
-        .await
-        .unwrap_or_else(|e| panic!("{e:?}"));
-    send.finish().unwrap_or_else(|e| panic!("{e:?}"));
-    let received = recv
-        .read_to_end(10)
-        .await
-        .unwrap_or_else(|e| panic!("{e:?}"));
-
-    info!("Received: {:?}", String::from_utf8(received));
 }

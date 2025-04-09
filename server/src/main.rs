@@ -34,11 +34,16 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync + 'static>> {
             while let Ok((mut send, mut recv)) = connection.accept_bi().await {
                 // Because it is a bidirectional stream, we can both send and receive.
                 let received = recv
-                    .read_to_end(50)
+                    .read_chunk(message::CHUNK_SIZE, false)
                     .await
-                    .unwrap_or_else(|e| panic!("Err: {e:?}"));
+                    .unwrap_or_else(|e| panic!("Err: {e:?}"))
+                    .unwrap();
 
-                info!("request: {:?}", String::from_utf8(received));
+                let msg =
+                    message::Message::decode(&received.bytes).unwrap_or_else(|e| panic!("{e:?}"));
+
+                info!("MESSAGE: {:?}", msg);
+
                 send.write_all(b"response")
                     .await
                     .unwrap_or_else(|e| panic!("Err: {e:?}"));

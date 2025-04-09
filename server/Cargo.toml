@@ -12,3 +12,4 @@ rcgen = { version = "0.13.2", features = ["aws_lc_rs"] }
 rustls = { version = "0.23.25", features = ["aws-lc-rs", "ring"] }
 spdlog-rs = "0.4.1"
 tokio = { version = "1.44.2", features = ["full"] }
+message = { package = "message", path = "../message" }
