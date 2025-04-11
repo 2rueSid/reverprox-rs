@@ -1,5 +1,4 @@
-use bytes::Bytes;
-use message::{Message, msg_utils};
+use message::{InitializationMessage, Message, MessageType, msg_utils};
 use spdlog::info;
 use std::{
     error::Error,
@@ -31,7 +30,7 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync + 'static>> {
 
     let client = make_client_endpoint(client_addr, &[&server_cert])?;
 
-    tokio::join!(run_client(&client, server_addr));
+    run_client(&client, server_addr).await;
 
     client.wait_idle().await;
 
@@ -41,30 +40,45 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync + 'static>> {
 async fn run_client(endpoint: &Endpoint, server_addr: SocketAddr) {
     let connect = endpoint.connect(server_addr, "localhost").unwrap();
     let connection = connect.await.unwrap();
-    let msg = Message::new(
-        message::MessageType::Initial,
-        msg_utils::generate_uuid(),
-        Bytes::from_static(b"Hello world!!"),
+    let connection_id = msg_utils::generate_uuid();
+
+    let initialization_payload = InitializationMessage::new(
+        SocketAddr::new(IpAddr::V4(Ipv4Addr::LOCALHOST), 20000),
+        SocketAddr::new(IpAddr::V4(Ipv4Addr::LOCALHOST), 3000),
+    )
+    .unwrap_or_else(|e| panic!("{e:?}"));
+
+    let init_msg = Message::new(
+        MessageType::Initial,
+        connection_id,
+        initialization_payload.encode(),
     );
 
-    let (mut send, mut recv) = connection
-        .open_bi()
-        .await
-        .unwrap_or_else(|e| panic!("{e:?}"));
-
+    let (mut send, mut recv) = connection.open_bi().await.unwrap();
     info!("[client] connected: addr={}", connection.remote_address());
 
-    send.write_chunk(msg.encode())
-        .await
-        .unwrap_or_else(|e| panic!("{e:?}"));
+    tokio::spawn(async move {
+        loop {
+            match recv.read_chunk(500, true).await {
+                Ok(Some(chunk)) => {
+                    info!(
+                        "[client] received: {:?}",
+                        String::from_utf8_lossy(&chunk.bytes)
+                    );
+                }
 
-    send.finish().unwrap_or_else(|e| panic!("{e:?}"));
-    let received = recv
-        .read_to_end(10)
-        .await
-        .unwrap_or_else(|e| panic!("{e:?}"));
+                Ok(None) => {
+                    continue;
+                }
 
-    info!("Received: {:?}", String::from_utf8(received));
+                Err(e) => {
+                    info!("[server] error reading: {e:?}");
+                    break;
+                }
+            }
+        }
+    });
+    send.write_chunk(init_msg.encode()).await.unwrap();
 }
 
 fn make_client_endpoint(
@@ -87,3 +101,11 @@ fn configure_client(
 
     Ok(ClientConfig::with_root_certificates(Arc::new(certs))?)
 }
+
+// async fn send_tcp_request() -> Result<(), Box<dyn Error>> {
+//     let mut stream = TcpStream::connect("127.0.0.1:8080").await?;
+//
+//     let raw_http = b"GET / HTTP/1.1\r\nHost: localhost\r\n\r\n";
+//     stream.write_all(raw_http).await?;
+//     Ok(())
+// }

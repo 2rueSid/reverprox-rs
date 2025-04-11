@@ -33,26 +33,10 @@
 // defined by the `length`.
 //
 // This protocol works both ways — from client to server and from server to client.
-//
-// Example of encoded Message (in bytes):
-//
-// +--------+----------+--------------+-------------------+--------------+----------------------+
-// | magic  | version  | message_type | connection_id     | length       | payload              |
-// | 0xAA   | 0x01     | 0x02 (Data)  | 0xDEADBEEF         | 0x00000010   | [16 bytes of data]   |
-// +--------+----------+--------------+-------------------+--------------+----------------------+
-//
-
-// Example InitializationMessage payload (within a Message with message_type = Initial):
-//
-// +------------------+--------------------+----------------+-------------+-------------+
-// | connection_id    | client_ip          | client_port    | proxy_port  | proxy_host  |
-// | 0xDEADBEEF       | [192, 168, 1, 10]  | 0x1F90 (8080)  | 0x0BB8(3000) | 0x0001      |
-// +------------------+--------------------+----------------+-------------+-------------+
-//
-// Note: This payload would be packed into `payload` field of a `Message` where
-// `message_type = Initial`.
-
-use std::io::{self, ErrorKind};
+use std::{
+    io::{self, ErrorKind},
+    net::{IpAddr, Ipv4Addr, SocketAddr},
+};
 
 use bytes::Bytes;
 use uuid::Uuid;
@@ -119,23 +103,6 @@ pub struct Message {
 
     /// Actual Payload; variable length = N; interpretation depends on `message_type`.
     pub payload: Bytes,
-}
-
-/// A payload structure that appears only in the [`MessageType::Initial`] message.
-/// It contains metadata required to associate a client with a target server to proxy.
-#[derive(Debug, Clone, Copy)]
-pub struct InitializationMessage {
-    /// IPv4 address of the client; fixed length = 4 bytes.
-    pub client_ip: [u8; 4],
-
-    /// Port on which the client runs the QUIC connection; fixed length = 2 bytes.
-    pub client_port: u16,
-
-    /// Local port on the client machine the server will proxy data to; fixed length = 2 bytes.
-    pub proxy_port: u16,
-
-    /// Placeholder for future use; or a hash/index of known hosts; fixed length = 2 bytes.
-    pub proxy_host: u16,
 }
 
 impl Message {
@@ -227,6 +194,84 @@ impl Message {
             connection_id,
             length,
             payload,
+        })
+    }
+}
+
+/// A payload structure that appears only in the [`MessageType::Initial`] message.
+/// It contains metadata required to associate a client with a target server to proxy.
+#[derive(Debug, Clone, Copy)]
+pub struct InitializationMessage {
+    /// IPv4 address of the client
+    pub client_ip: Ipv4Addr,
+
+    /// Port on which the client runs the QUIC connection
+    pub client_port: u16,
+
+    /// Local port on the client machine the server will proxy data to
+    pub proxy_port: u16,
+
+    /// Local host on the client machine the server will proxy data to
+    pub proxy_host: Ipv4Addr,
+}
+
+impl InitializationMessage {
+    pub fn new(addr: SocketAddr, proxy_addr: SocketAddr) -> io::Result<InitializationMessage> {
+        if !addr.is_ipv4() || !proxy_addr.is_ipv4() {
+            return Err(io::Error::new(
+                ErrorKind::Unsupported,
+                "IPv6 is not supported",
+            ));
+        }
+
+        let ipv4 = match addr.ip() {
+            IpAddr::V4(ipv4) => ipv4,
+            _ => unreachable!(),
+        };
+
+        let proxy_ipv4 = match proxy_addr.ip() {
+            IpAddr::V4(ipv4) => ipv4,
+            _ => unreachable!(),
+        };
+
+        Ok(InitializationMessage {
+            client_ip: ipv4,
+            client_port: addr.port(),
+            proxy_port: proxy_addr.port(),
+            proxy_host: proxy_ipv4,
+        })
+    }
+
+    pub fn encode(&self) -> Bytes {
+        let mut buffer = Vec::with_capacity(12);
+
+        buffer.extend_from_slice(&self.client_port.to_be_bytes());
+        buffer.extend_from_slice(&self.proxy_port.to_be_bytes());
+        buffer.extend_from_slice(&self.client_ip.octets());
+        buffer.extend_from_slice(&self.proxy_host.octets());
+
+        Bytes::from(buffer)
+    }
+
+    pub fn decode(msg: &Bytes) -> io::Result<InitializationMessage> {
+        if msg.len() < 12 {
+            return Err(io::Error::new(
+                ErrorKind::UnexpectedEof,
+                "Initial message is incorrect",
+            ));
+        }
+
+        let client_port = u16::from_be_bytes(msg[0..2].try_into().unwrap());
+        let proxy_port = u16::from_be_bytes(msg[2..4].try_into().unwrap());
+
+        let client_ip = Ipv4Addr::from_bits(u32::from_be_bytes(msg[4..8].try_into().unwrap()));
+        let proxy_host = Ipv4Addr::from_bits(u32::from_be_bytes(msg[8..12].try_into().unwrap()));
+
+        Ok(InitializationMessage {
+            client_ip,
+            client_port,
+            proxy_port,
+            proxy_host,
         })
     }
 }

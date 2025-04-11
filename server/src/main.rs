@@ -1,7 +1,10 @@
-use std::{error::Error, fs::File, io::Write, path::Path};
+use std::{error::Error, fs::File, io::Write, path::Path, time::Duration};
 
+use bytes::Bytes;
+use message::{InitializationMessage, MessageType};
 use pem::Pem;
 use spdlog::prelude::info;
+use tokio::time::sleep;
 
 mod config;
 mod server;
@@ -32,22 +35,47 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync + 'static>> {
             );
 
             while let Ok((mut send, mut recv)) = connection.accept_bi().await {
-                // Because it is a bidirectional stream, we can both send and receive.
-                let received = recv
-                    .read_chunk(message::CHUNK_SIZE, false)
-                    .await
-                    .unwrap_or_else(|e| panic!("Err: {e:?}"))
-                    .unwrap();
+                tokio::spawn(async move {
+                    loop {
+                        match recv.read_chunk(500, true).await {
+                            Ok(Some(chunk)) => {
+                                let msg = message::Message::decode(&chunk.bytes).unwrap();
+                                info!("[server] received: {:?}", msg);
 
-                let msg =
-                    message::Message::decode(&received.bytes).unwrap_or_else(|e| panic!("{e:?}"));
+                                match msg.message_type {
+                                    MessageType::Initial => {
+                                        info!("Message Type - Initial");
+                                        let payload = InitializationMessage::decode(&msg.payload);
 
-                info!("MESSAGE: {:?}", msg);
+                                        info!("Message Payload -> {:?}", payload);
+                                    }
+                                    MessageType::Data => {}
+                                    MessageType::Close => {}
+                                    MessageType::Ping => {}
+                                    _ => panic!("Unreachable"),
+                                }
+                            }
+                            Ok(None) => {
+                                continue;
+                            }
+                            Err(e) => {
+                                info!("[server] error reading: {e:?}");
+                                break;
+                            }
+                        }
+                    }
+                });
 
-                send.write_all(b"response")
+                send.write_chunk(Bytes::from_static(b"response"))
                     .await
                     .unwrap_or_else(|e| panic!("Err: {e:?}"));
-                send.finish().unwrap_or_else(|e| panic!("Err: {e:?}"))
+
+                sleep(Duration::from_secs(2)).await;
+                info!("here");
+
+                send.write_chunk(Bytes::from_static(b"response22"))
+                    .await
+                    .unwrap_or_else(|e| panic!("Err: {e:?}"));
             }
         });
     }

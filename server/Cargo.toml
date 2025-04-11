@@ -13,3 +13,6 @@ rustls = { version = "0.23.25", features = ["aws-lc-rs", "ring"] }
 spdlog-rs = "0.4.1"
 tokio = { version = "1.44.2", features = ["full"] }
 message = { package = "message", path = "../message" }
+hyper = { version = "1.6.0", features = ["full"] }
+http-body-util = "0.1.3"
+hyper-util = { version = "0.1.11", features = ["full"] }
