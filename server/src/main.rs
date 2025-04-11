@@ -37,7 +37,7 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync + 'static>> {
             while let Ok((mut send, mut recv)) = connection.accept_bi().await {
                 tokio::spawn(async move {
                     loop {
-                        match recv.read_chunk(500, true).await {
+                        match recv.read_chunk(500, false).await {
                             Ok(Some(chunk)) => {
                                 let msg = message::Message::decode(&chunk.bytes).unwrap();
                                 info!("[server] received: {:?}", msg);

@@ -1,13 +1,19 @@
+use bytes::Bytes;
 use message::{InitializationMessage, Message, MessageType, msg_utils};
-use spdlog::info;
+use spdlog::{error, info, warn};
 use std::{
     error::Error,
     fs,
     net::{IpAddr, Ipv4Addr, SocketAddr},
     sync::Arc,
+    time::Duration,
+};
+use tokio::{
+    sync::{Mutex, TryLockError},
+    time::sleep,
 };
 
-use quinn::{ClientConfig, Endpoint};
+use quinn::{ClientConfig, Endpoint, SendStream};
 use rustls::pki_types::CertificateDer;
 
 #[tokio::main]
@@ -54,8 +60,10 @@ async fn run_client(endpoint: &Endpoint, server_addr: SocketAddr) {
         initialization_payload.encode(),
     );
 
-    let (mut send, mut recv) = connection.open_bi().await.unwrap();
+    let (send, mut recv) = connection.open_bi().await.unwrap();
     info!("[client] connected: addr={}", connection.remote_address());
+
+    let send = Arc::new(Mutex::new(send));
 
     tokio::spawn(async move {
         loop {
@@ -78,7 +86,35 @@ async fn run_client(endpoint: &Endpoint, server_addr: SocketAddr) {
             }
         }
     });
-    send.write_chunk(init_msg.encode()).await.unwrap();
+
+    send_msg(&send, &init_msg).await;
+
+    tokio::spawn({
+        let send = send.clone();
+        async move {
+            loop {
+                let ping = Message::new(
+                    MessageType::Ping,
+                    connection_id,
+                    Bytes::from_static(b"ping"),
+                );
+                info!("Sending ping..");
+                send_msg(&send, &ping).await;
+
+                sleep(Duration::from_secs(10)).await;
+            }
+        }
+    });
+
+    info!("Here before 2nd init");
+    send_msg(&send, &init_msg).await;
+}
+
+async fn send_msg(send: &Arc<Mutex<SendStream>>, msg: &Message) {
+    let mut send = send.lock().await;
+    if let Err(e) = send.write_chunk(msg.encode()).await {
+        error!("Failed to send message: {:?}", e);
+    }
 }
 
 fn make_client_endpoint(

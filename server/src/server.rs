@@ -1,7 +1,7 @@
 use quinn::{Endpoint, ServerConfig, VarInt};
 use rustls::pki_types::{CertificateDer, PrivatePkcs8KeyDer};
 
-use std::{error::Error, net::SocketAddr, sync::Arc, time::Duration};
+use std::{error::Error, net::SocketAddr, sync::Arc};
 
 pub fn make_server_endpoint(
     bind_addr: SocketAddr,
@@ -21,7 +21,7 @@ fn configure_server()
         ServerConfig::with_single_cert(vec![cert_der.clone()], priv_key.into())?;
     let transport_config = Arc::get_mut(&mut server_config.transport).unwrap();
     transport_config.max_concurrent_uni_streams(0_u8.into());
-    transport_config.keep_alive_interval(Duration::from_secs(30).into());
+    // transport_config.keep_alive_interval(Duration::from_secs(30).into());
     transport_config.max_idle_timeout(Some(VarInt::from_u32(60_000).into()));
 
     Ok((server_config, cert_der))
